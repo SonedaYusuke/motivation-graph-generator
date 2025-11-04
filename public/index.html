@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>モチベーショングラフエディタ</title>
+    <!-- Tailwind CSSの読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* カスタムスタイル */
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap");
+      body {
+        font-family: "Inter", sans-serif;
+      }
+
+      /* キャンバスの親要素にレスポンシブなアスペクト比を設定 */
+      #canvas-container {
+        width: 100%;
+        aspect-ratio: 16 / 9; /* グラフの一般的なアスペクト比 */
+        margin: 0 auto;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1),
+          0 2px 4px -2px rgb(0 0 0 / 0.1);
+        overflow: hidden;
+        background-color: #ffffff;
+      }
+      #motivationCanvas {
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 p-4 sm:p-8">
+    <!-- 全体コンテナの幅を4xlから6xlに拡大 -->
+    <div class="max-w-6xl mx-auto">
+      <header class="text-center mb-8">
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-blue-600 mb-2">
+          モチベーショングラフ
+        </h1>
+        <p class="text-gray-500">
+          あなたの人生のモチベーションの変遷を視覚化します。
+        </p>
+      </header>
+
+      <!-- メインコンテンツを縦積みのレイアウトに変更 -->
+      <main class="space-y-8">
+        <!-- グラフ表示＆アクションパネル (sticky top-4 z-10 を削除し、通常のフローに戻す) -->
+        <div class="w-full">
+          <div id="canvas-container">
+            <canvas id="motivationCanvas"></canvas>
+          </div>
+
+          <!-- 4. アクションボタン -->
+          <div class="mt-6 flex flex-col sm:flex-row gap-4">
+            <button
+              onclick="saveImage()"
+              class="flex-1 bg-green-500 text-white py-3 px-4 rounded-lg hover:bg-green-600 transition duration-150 shadow-xl font-bold text-lg"
+            >
+              グラフを画像として保存 (PNG)
+            </button>
+            <button
+              onclick="resetGraph()"
+              class="flex-1 bg-red-500 text-white py-3 px-4 rounded-lg hover:bg-red-600 transition duration-150 shadow-xl font-bold text-lg"
+            >
+              グラフをリセット
+            </button>
+          </div>
+        </div>
+
+        <!-- グラフ設定＆入力パネル (グラフの下に配置される) -->
+        <div class="bg-white p-6 rounded-xl shadow-lg h-fit">
+          <h2 class="text-xl font-bold mb-4 text-gray-700">ポイント編集</h2>
+
+          <h3 class="text-lg font-bold mt-6 mb-3 border-t pt-4 text-gray-700">
+            新規ポイントの追加
+          </h3>
+
+          <!-- 2. 新規アンカーポイント入力 - 縦積みを維持 -->
+          <div class="space-y-4 mb-4">
+            <div>
+              <label
+                for="newAgeInput"
+                class="block text-sm font-medium text-gray-700"
+                >年齢</label
+              >
+              <input
+                type="number"
+                id="newAgeInput"
+                min="0"
+                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+              />
+            </div>
+            <div>
+              <label
+                for="newMotivationInput"
+                class="block text-sm font-medium text-gray-700"
+                >モチベーション (%)</label
+              >
+              <input
+                type="number"
+                id="newMotivationInput"
+                min="-100"
+                max="100"
+                class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-2 border"
+                placeholder="-100 から +100"
+              />
+            </div>
+          </div>
+
+          <button
+            onclick="addPoint()"
+            class="w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 transition duration-150 shadow-md font-semibold"
+          >
+            ポイントを追加・更新
+          </button>
+
+          <!-- 3. ポイントリスト (編集フォーム) -->
+          <h3 class="text-lg font-bold mt-6 mb-3 border-t pt-4 text-gray-700">
+            入力済みポイントの編集
+          </h3>
+
+          <div class="flex text-xs font-semibold text-gray-500 mb-2 px-3">
+            <span class="w-1/4">年齢</span>
+            <span class="w-2/5 text-center">モチベーション</span>
+            <span class="w-1/4 text-right">操作</span>
+          </div>
+
+          <div id="pointsList" class="space-y-2 max-h-48 overflow-y-auto">
+            <!-- 編集可能なフォーム要素がここに追加されます -->
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("motivationCanvas");
+      const ctx = canvas.getContext("2d");
+      const newAgeInput = document.getElementById("newAgeInput");
+      const newMotivationInput = document.getElementById("newMotivationInput");
+      const pointsList = document.getElementById("pointsList");
+
+      // 状態管理
+      let points = []; // DOMContentLoadedで初期化される
+
+      // Canvasサイズ設定
+      function setupCanvasSize() {
+        // 親要素のサイズに合わせてCanvasの描画解像度を設定
+        const container = document.getElementById("canvas-container");
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = container.clientWidth * ratio;
+        canvas.height = container.clientHeight * ratio;
+        ctx.scale(ratio, ratio);
+      }
+
+      // 座標マッピング関数
+      function mapToCanvas(age, motivation, maxAge, width, height) {
+        const paddingX = 40;
+        const paddingY = 40;
+        const plotWidth = width - 2 * paddingX;
+        const plotHeight = height - 2 * paddingY;
+
+        // X軸（年齢）：0歳から最大入力年齢まで
+        let x = paddingX + (age / maxAge) * plotWidth;
+
+        // Y軸（モチベーション）：-100%から+100% (全体で200%のレンジ)
+        // 0%が中央 (height / 2)
+        // +100%は上、-100%は下
+        // motivation: -100 -> +1.0 (bottom), +100 -> +0.0 (top)
+        let normalizedMotivation = (motivation + 100) / 200; // 0 (at -100) to 1 (at +100)
+        let y = paddingY + plotHeight * (1 - normalizedMotivation); // Canvas座標は上から下が正
+
+        return { x, y };
+      }
+
+      // グラフ描画
+      function drawGraph() {
+        // 親要素のクライアントサイズを取得
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+
+        // 背景とクリア
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = "#f8f9fa";
+        ctx.fillRect(0, 0, width, height);
+
+        // データ準備
+        points.sort((a, b) => a.age - b.age);
+        if (points.length === 0) return;
+
+        const maxAge = Math.max(...points.map((p) => p.age), 10); // 最小は10歳とする
+        const paddingX = 40;
+        const paddingY = 40;
+        const plotWidth = width - 2 * paddingX;
+        const plotHeight = height - 2 * paddingY;
+        const centerY = paddingY + plotHeight * 0.5;
+
+        // --- 1. グリッドと軸の描画 ---
+        ctx.font = "12px Inter";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "middle";
+
+        // Y軸ラベルとライン (+100%, 0%, -100%)
+        const levels = [100, 0, -100];
+        const colors = ["#fca5a5", "#9ca3af", "#93c5fd"]; // 赤、灰、青
+
+        levels.forEach((level, index) => {
+          const { y } = mapToCanvas(0, level, maxAge, width, height);
+
+          // ライン
+          ctx.strokeStyle = colors[index];
+          ctx.lineWidth = level === 0 ? 2 : 1;
+          ctx.beginPath();
+          ctx.moveTo(paddingX, y);
+          ctx.lineTo(width - paddingX, y);
+          ctx.stroke();
+
+          // ラベル
+          ctx.fillStyle = colors[index];
+          ctx.fillText(`${level}%`, paddingX - 10, y);
+        });
+
+        // X軸（年齢）の描画とラベル
+        ctx.strokeStyle = "#9ca3af";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(paddingX, height - paddingY);
+        ctx.lineTo(width - paddingX, height - paddingY);
+        ctx.stroke();
+
+        // X軸ラベル (5歳刻みで表示)
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = "#6b7280";
+
+        // 年齢の刻みを5歳に固定
+        const step = 5;
+
+        for (let age = 0; age <= maxAge; age += step) {
+          if (age === 0) continue; // 0歳はY軸の開始点なのでスキップ
+
+          const { x } = mapToCanvas(age, 0, maxAge, width, height);
+          // 目盛り線
+          ctx.beginPath();
+          ctx.moveTo(x, height - paddingY);
+          ctx.lineTo(x, height - paddingY + 5);
+          ctx.stroke();
+
+          // ラベル
+          ctx.fillText(`${age}歳`, x, height - paddingY + 8);
+        }
+
+        // 最大年齢が5の倍数でない場合、最大年齢のラベルを表示
+        if (maxAge % step !== 0) {
+          const { x } = mapToCanvas(maxAge, 0, maxAge, width, height);
+          ctx.fillText(`${maxAge}歳`, x, height - paddingY + 8);
+        }
+
+        // --- 2. スムーズなスプライン曲線（Catmull-Rom近似）の描画 ---
+
+        if (points.length < 2) {
+          // ポイントが1つ以下の場合は線を描画しない
+          if (points.length === 1) {
+            const { x, y } = mapToCanvas(
+              points[0].age,
+              points[0].motivation,
+              maxAge,
+              width,
+              height
+            );
+            // 1点だけでもその点に円を描画
+            ctx.fillStyle = "#3b82f6";
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          return;
+        }
+
+        ctx.strokeStyle = "#3b82f6"; // 青
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+
+        const p0 = mapToCanvas(
+          points[0].age,
+          points[0].motivation,
+          maxAge,
+          width,
+          height
+        );
+        ctx.moveTo(p0.x, p0.y);
+
+        // 三次ベジェ曲線を用いたスムーズな接続（スプライン近似）
+        for (let i = 0; i < points.length - 1; i++) {
+          const p1 = mapToCanvas(
+            points[i].age,
+            points[i].motivation,
+            maxAge,
+            width,
+            height
+          );
+          const p2 = mapToCanvas(
+            points[i + 1].age,
+            points[i + 1].motivation,
+            maxAge,
+            width,
+            height
+          );
+
+          // p_prev: 前のポイント (存在しない場合は p1 を使用)
+          const p_prev =
+            i > 0
+              ? mapToCanvas(
+                  points[i - 1].age,
+                  points[i - 1].motivation,
+                  maxAge,
+                  width,
+                  height
+                )
+              : p1;
+          // p_next: 次のポイント (存在しない場合は p2 を使用)
+          const p_next =
+            i < points.length - 2
+              ? mapToCanvas(
+                  points[i + 2].age,
+                  points[i + 2].motivation,
+                  maxAge,
+                  width,
+                  height
+                )
+              : p2;
+
+          // 制御点の計算 (Catmull-Romに基づいたTangent/Tensionベースの制御点)
+          // テンションを考慮しないシンプルな設定 (t=0.5)
+          const tension = 0.5;
+
+          // 制御点1 (p1側)
+          const cp1x = p1.x + ((p2.x - p_prev.x) / 6) * tension;
+          const cp1y = p1.y + ((p2.y - p_prev.y) / 6) * tension;
+
+          // 制御点2 (p2側)
+          const cp2x = p2.x - ((p_next.x - p1.x) / 6) * tension;
+          const cp2y = p2.y - ((p_next.y - p1.y) / 6) * tension;
+
+          // p1 から p2 へ三次ベジェ曲線を描画
+          // これにより、アンカーポイント間が滑らかに繋がる
+          ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+        }
+        ctx.stroke();
+
+        // --- 3. アンカーポイントの描画 ---
+        points.forEach((p) => {
+          const { x, y } = mapToCanvas(
+            p.age,
+            p.motivation,
+            maxAge,
+            width,
+            height
+          );
+
+          // 点
+          ctx.fillStyle = "#ef4444"; // 赤
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // ラベル (年齢とモチベーション)
+          ctx.fillStyle = "#1f2937";
+          ctx.textAlign = "center";
+          ctx.textBaseline = y < centerY ? "bottom" : "top"; // 0%より上なら下側に、下なら上側に表示
+
+          const labelY = y + (y < centerY ? -10 : 15);
+
+          // 0歳の場合はY軸に近すぎるため、ラベルを少しずらす
+          if (p.age === 0) {
+            ctx.textAlign = "left";
+            ctx.fillText(`${p.age}歳 (${p.motivation}%)`, x + 5, labelY);
+          } else {
+            ctx.fillText(`${p.age}歳 (${p.motivation}%)`, x, labelY);
+          }
+        });
+      }
+
+      // ポイント追加/更新
+      function addPoint() {
+        const age = parseInt(newAgeInput.value);
+        const motivation = parseInt(newMotivationInput.value);
+
+        // バリデーション
+        // 0歳を許可
+        if (isNaN(age) || isNaN(motivation) || age < 0) {
+          alert(
+            "年齢（0歳以上）とモチベーション（-100%〜+100%）を正しく入力してください。"
+          );
+          return;
+        }
+        if (motivation < -100 || motivation > 100) {
+          alert("モチベーションは-100%から+100%の間で入力してください。");
+          return;
+        }
+
+        // 既存ポイントの更新または新規追加
+        const existingIndex = points.findIndex((p) => p.age === age);
+        if (existingIndex !== -1) {
+          points[existingIndex].motivation = motivation;
+        } else {
+          points.push({ age, motivation });
+        }
+
+        // 入力欄をクリア
+        newAgeInput.value = "";
+        newMotivationInput.value = "";
+
+        updateListAndDraw();
+      }
+
+      // ポイントのモチベーション値を更新
+      window.updatePointMotivation = function (age, motivation) {
+        const point = points.find((p) => p.age === age);
+        if (point) {
+          // motivationが数値で範囲内であることを確認
+          const mot = parseInt(motivation);
+          if (!isNaN(mot) && mot >= -100 && mot <= 100) {
+            point.motivation = mot;
+            // motivationの更新は頻繁に行われるため、描画は1回にまとめる
+            updateListAndDraw();
+          }
+        }
+      };
+
+      // ポイントの年齢値を更新
+      window.updatePointAge = function (oldAge, newAgeStr) {
+        const newAge = parseInt(newAgeStr);
+
+        // 基準点（0歳）の年齢変更は不可
+        if (oldAge === 0) {
+          updateListAndDraw(); // 強制的に再描画して値を戻す
+          return;
+        }
+
+        // 無効な値や年齢が負の場合は無視
+        if (isNaN(newAge) || newAge < 0) {
+          updateListAndDraw(); // 強制的に再描画して値を戻す
+          return;
+        }
+
+        // 既存のポイントを探す (更新対象)
+        const pointIndex = points.findIndex((p) => p.age === oldAge);
+
+        // 既に新しい年齢が存在するか確認 (現在のポイントを除く)
+        if (points.some((p) => p.age === newAge && p.age !== oldAge)) {
+          alert(
+            `年齢 ${newAge} は既に存在します。ポイントをマージするか、別の年齢を入力してください。`
+          );
+          updateListAndDraw(); // 強制的に再描画して元の値に戻す
+          return;
+        }
+
+        if (pointIndex !== -1) {
+          // 年齢を更新
+          points[pointIndex].age = newAge;
+          // 古い age を新しい age で更新したため、リスト全体を再描画する必要がある
+          updateListAndDraw();
+        }
+      };
+
+      // ポイントリストの更新
+      function updatePointsList() {
+        pointsList.innerHTML = "";
+        points.sort((a, b) => a.age - b.age);
+
+        points.forEach((p, index) => {
+          const isBasePoint = p.age === 0; // 0歳のみ基準点とする
+
+          const item = document.createElement("div");
+          item.className =
+            "flex items-center space-x-2 bg-gray-50 p-3 rounded-md border shadow-sm";
+
+          // 年齢入力フィールド
+          const ageInputDisabled = isBasePoint ? "disabled" : "";
+          const ageInputClass = isBasePoint
+            ? "bg-gray-200 cursor-not-allowed text-gray-500"
+            : "bg-white font-semibold";
+
+          const ageInput = `
+                    <input type="number" 
+                           value="${p.age}" 
+                           min="0" 
+                           data-old-age="${p.age}"
+                           ${ageInputDisabled}
+                           title="${
+                             isBasePoint
+                               ? "基準点のため年齢は変更できません"
+                               : "年齢を入力"
+                           }"
+                           class="age-input w-1/4 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-1 border text-sm text-center ${ageInputClass}">
+                `;
+
+          // モチベーション入力フィールド
+          const motivationInput = `
+                    <input type="number" 
+                           value="${p.motivation}" 
+                           min="-100" 
+                           max="100" 
+                           data-age="${p.age}"
+                           class="motivation-input w-2/5 bg-white rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 p-1 border text-sm text-center font-semibold">
+                `;
+
+          // 削除ボタン
+          const deleteSection = isBasePoint
+            ? `<div class="w-1/4 text-xs text-gray-400 text-right py-1">基準点</div>`
+            : `<button class="w-1/4 text-sm text-gray-400 hover:text-red-600 transition text-right" onclick="removePoint(${p.age})">削除</button>`;
+
+          item.innerHTML = ageInput + motivationInput + deleteSection;
+          pointsList.appendChild(item);
+        });
+
+        // 動的に追加された入力フィールドにイベントリスナーを設定
+        document.querySelectorAll(".motivation-input").forEach((input) => {
+          input.addEventListener("input", (e) => {
+            const age = parseInt(e.target.dataset.age);
+            // inputイベントではモチベーションの範囲チェックのみ行い、即座に更新する
+            const mot = parseInt(e.target.value);
+            if (!isNaN(mot) && mot >= -100 && mot <= 100) {
+              updatePointMotivation(age, mot);
+            }
+          });
+          input.addEventListener("blur", (e) => {
+            // blur時にもう一度チェックと再描画（色変更のため）
+            const age = parseInt(e.target.dataset.age);
+            const mot = parseInt(e.target.value);
+            if (isNaN(mot) || mot < -100 || mot > 100) {
+              // 無効な値が入力された場合は強制的に描画を更新して元の値に戻す
+              updateListAndDraw();
+            } else {
+              updatePointMotivation(age, mot);
+            }
+          });
+        });
+
+        document.querySelectorAll(".age-input").forEach((input) => {
+          // Blurイベントで年齢更新と重複チェックを行う
+          input.addEventListener("blur", (e) => {
+            const oldAge = parseInt(e.target.dataset.oldAge);
+            const newAge = e.target.value;
+            updatePointAge(oldAge, newAge);
+          });
+          // Enterキーでblurをトリガー
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.target.blur();
+            }
+          });
+        });
+      }
+
+      // ポイント削除
+      window.removePoint = function (ageToRemove) {
+        // 0歳の基準点は削除不可
+        if (ageToRemove === 0) {
+          console.log(
+            `Age ${ageToRemove} is a base point and cannot be removed.`
+          );
+          return;
+        }
+        points = points.filter((p) => p.age !== ageToRemove);
+        updateListAndDraw();
+      };
+
+      // 描画とリスト更新をまとめて実行
+      function updateListAndDraw() {
+        updatePointsList();
+        drawGraph();
+      }
+
+      // グラフのリセット
+      function resetGraph() {
+        points = [{ age: 0, motivation: 0 }];
+        updateListAndDraw();
+      }
+
+      // 画像保存
+      function saveImage() {
+        // 描画解像度を上げて再描画
+        setupCanvasSize();
+        drawGraph();
+
+        const dataURL = canvas.toDataURL("image/png");
+        const a = document.createElement("a");
+        a.href = dataURL;
+        a.download = "モチベーショングラフ.png";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // 表示用サイズに戻す（解像度のスケールをリセット）
+        const container = document.getElementById("canvas-container");
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = container.clientWidth * ratio;
+        canvas.height = container.clientHeight * ratio;
+        ctx.scale(ratio, ratio);
+        drawGraph();
+      }
+
+      // 初期化
+      window.addEventListener("resize", () => {
+        setupCanvasSize();
+        drawGraph();
+      });
+
+      document.addEventListener("DOMContentLoaded", () => {
+        setupCanvasSize();
+
+        // 初期ポイント設定: 0歳, 0%
+        points = [{ age: 0, motivation: 0 }];
+
+        // 初期サンプルポイントを追加
+        const samplePoints = [
+          { age: 25, motivation: 0 },
+          { age: 30, motivation: 50 },
+          { age: 15, motivation: -30 },
+        ];
+
+        samplePoints.forEach((sp) => {
+          if (!points.some((p) => p.age === sp.age)) {
+            points.push(sp);
+          }
+        });
+
+        // 重複年齢を削除
+        points = Array.from(new Map(points.map((p) => [p.age, p])).values());
+
+        updateListAndDraw();
+      });
+    </script>
+  </body>
+</html>
